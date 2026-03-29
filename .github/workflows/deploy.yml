@@ -1,32 +1,45 @@
-name: Deploy with Ansible
+- name: Deploy Node.js app to EC2
+  hosts: webservers
+  become: yes
 
-on:
-  push:
-    branches: [main]
+  tasks:
+    - name: Install required packages
+      apt:
+        name: ['git', 'curl']
+        state: present
+        update_cache: yes
 
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
+    - name: Install Node.js
+      shell: |
+        curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+        apt-get install -y nodejs
 
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+    - name: Install PM2 globally
+      npm:
+        name: pm2
+        global: yes
 
-      - name: Install Ansible
-        run: |
-          sudo apt update
-          sudo apt install -y ansible
+    - name: Create app directory
+      file:
+        path: /var/www/app
+        state: directory
+        owner: ubuntu
+        group: ubuntu
+        mode: '0755'
 
-      - name: Setup SSH key
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/deploy-key.pem
-          chmod 600 ~/.ssh/deploy-key.pem
+    - name: Pull latest code from GitHub
+      git:
+        repo: https://github.com/ArjunLearning/ansible-ci-cd.git
+        dest: /var/www/app
+        version: main
+        force: yes
 
-      - name: Add host to known_hosts
-        run: |
-          ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
+    - name: Install dependencies
+      shell: |
+        cd /var/www/app
+        npm install
 
-      - name: Run Ansible Playbook
-        run: |
-          ansible-playbook ansible/deploy.yml -i ansible/inventory.ini
+    - name: Start app with PM2
+      shell: |
+        cd /var/www/app
+        pm2 start src/app.js --name myapp || pm2 restart myapp
